@@ -29,4 +29,18 @@ describe('SSE parser', () => {
     expect(events).toEqual([{ name: 'message', data: '{bad json}', id: null }])
     expect(parseSseData(events[0].data)).toBe('{bad json}')
   })
+
+  it('does not treat CRLF split across chunks as an empty frame', () => {
+    const events = []
+    const malformed = vi.fn()
+    const parser = createSseParser(event => events.push(event), malformed)
+    parser.push('event: message\r')
+    parser.push('\ndata: hello\r')
+    parser.push('\n\r')
+    parser.push('\n')
+    parser.finish()
+
+    expect(events).toEqual([{ name: 'message', data: 'hello', id: null }])
+    expect(malformed).not.toHaveBeenCalled()
+  })
 })

@@ -39,7 +39,7 @@ class MultiAgentChatServiceTest {
     void disabledFlagUsesLegacyService() {
         properties.setEnabled(false);
         SseEmitter fallback = new SseEmitter();
-        when(legacyService.chatStream(request)).thenReturn(fallback);
+        when(legacyService.frontChatStream(request)).thenReturn(fallback);
         MultiAgentChatService service = service();
         assertSame(fallback, service.chatStream(request, false));
         verifyNoInteractions(pythonClient);

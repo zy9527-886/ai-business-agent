@@ -35,8 +35,11 @@ export const createSseParser = (onEvent, onMalformed = () => {}) => {
     onEvent({ name, data: data.join('\n'), id })
   }
 
-  const drain = () => {
+  const drain = (final = false) => {
+    const pendingCarriageReturn = !final && buffer.endsWith('\r')
+    if (pendingCarriageReturn) buffer = buffer.slice(0, -1)
     buffer = buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    if (pendingCarriageReturn) buffer += '\r'
     let boundary = buffer.indexOf('\n\n')
     while (boundary >= 0) {
       parseFrame(buffer.slice(0, boundary))
@@ -48,10 +51,10 @@ export const createSseParser = (onEvent, onMalformed = () => {}) => {
   return {
     push(chunk) {
       buffer += chunk
-      drain()
+      drain(false)
     },
     finish() {
-      drain()
+      drain(true)
       if (buffer.trim()) parseFrame(buffer)
       buffer = ''
     }

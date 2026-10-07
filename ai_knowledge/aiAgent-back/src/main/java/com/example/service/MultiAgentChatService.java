@@ -41,7 +41,9 @@ public class MultiAgentChatService {
 
     public SseEmitter chatStream(KnowledgeChatRequest request, boolean front) {
         if (!properties.isEnabled() || !pythonClient.isAvailable()) {
-            return front ? legacyService.frontChatStream(request) : legacyService.chatStream(request);
+            // 新前端只提交 Python Profile，不再提交旧的 Java 模型配置 ID。
+            // 回退路径统一使用 Java 已启用的默认模型，管理端与用户端都能继续工作。
+            return legacyService.frontChatStream(request);
         }
         if (request == null || StrUtil.isBlank(request.getQuestion())) {
             throw new CustomException(ResultCodeEnum.PARAM_ERROR.code, "请输入问题");

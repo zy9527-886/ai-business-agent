@@ -43,9 +43,3 @@ python -m pytest -p no:cacheprovider -q
 
 真实 PostgreSQL 集成测试仅在设置 `TEST_DATABASE_URL` 时运行。真实模型/Tavily 冒烟测试必须显式提供测试凭据，不应使用生产密钥。
 
-## Docker
-
-```bash
-docker build -t aiagent-python ./ai_knowledge/aiAgent-python
-docker run --rm -p 8000:8000 --env-file ./ai_knowledge/aiAgent-python/.env aiagent-python
-```

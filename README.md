@@ -133,7 +133,7 @@ python -m pip install -e ".[test]"
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Java 可通过环境变量 `AGENT_PYTHON_ENABLED=true` 和 `AGENT_PYTHON_BASE_URL=http://127.0.0.1:8000` 启用新链路。Python 的详细配置、Docker 与测试方式见该模块 README。
+Java 可通过环境变量 `AGENT_PYTHON_ENABLED=true` 和 `AGENT_PYTHON_BASE_URL=http://127.0.0.1:8000` 启用新链路。Python 的详细配置与测试方式见该模块 README。
 
 ### 4. 启动前端
 
