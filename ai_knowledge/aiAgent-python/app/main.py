@@ -33,6 +33,7 @@ def create_app(
     chat_runtime: Any | None = None,
     capability_registry: Any | None = None,
     handoff_repository: Any | None = None,
+    model_capabilities: Callable[[], list[dict[str, object]]] | None = None,
     shared_secret: str | None = None,
 ) -> FastAPI:
     settings = get_settings()
@@ -48,7 +49,9 @@ def create_app(
         if embedding_provider is not None:
             from app.api.embeddings import build_embeddings_router
 
-            app.include_router(build_embeddings_router(embedding_provider, auth_dependency))
+            app.include_router(build_embeddings_router(
+                embedding_provider, auth_dependency, model_capabilities
+            ))
         if chat_runtime is not None:
             if capability_registry is None:
                 raise ValueError("capability_registry is required with chat_runtime")
@@ -129,6 +132,7 @@ def create_default_app() -> FastAPI:
         chat_runtime=runtime,
         capability_registry=capabilities,
         handoff_repository=handoffs,
+        model_capabilities=registry.capabilities,
         shared_secret=settings.shared_secret,
     )
 

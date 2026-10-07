@@ -20,6 +20,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.UUID;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 @Component
@@ -44,6 +47,27 @@ public class PythonAgentClient {
                     .toBodilessEntity().getStatusCode().is2xxSuccessful();
         } catch (Exception ignored) {
             return false;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> modelCapabilities() {
+        String path = "/api/v1/capabilities/models";
+        byte[] body = new byte[0];
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String nonce = UUID.randomUUID().toString();
+        try {
+            Map<String, Object> response = restClient.get().uri(path)
+                    .header("X-Timestamp", timestamp)
+                    .header("X-Nonce", nonce)
+                    .header("X-Signature", sign("GET", path, timestamp, nonce, body))
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {});
+            Object profiles = response == null ? null : response.get("profiles");
+            return profiles instanceof List<?> list
+                    ? (List<Map<String, Object>>) list : Collections.emptyList();
+        } catch (Exception ignored) {
+            return Collections.emptyList();
         }
     }
 

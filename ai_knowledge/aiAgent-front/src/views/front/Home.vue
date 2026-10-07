@@ -65,6 +65,10 @@
           </div>
           <el-button text @click="data.chatVisible = false">关闭</el-button>
         </div>
+        <div style="padding: 0 18px 8px; display:flex; gap:8px">
+          <el-tag size="small">{{ data.status || '就绪' }}</el-tag>
+          <el-tag size="small" type="warning" v-if="data.handoff">已转人工</el-tag>
+        </div>
         <div class="chat-messages" ref="messageRef">
           <div v-for="(item, index) in data.messages" :key="index" :class="['chat-message', item.role]">
             <div class="bubble" v-if="item.role === 'user'">{{ item.content }}</div>
@@ -91,6 +95,7 @@
 import { nextTick, reactive, ref } from "vue";
 import request from "@/utils/request.js";
 import { ElMessage } from "element-plus";
+import { consumeSseResponse, parseSseData } from "@/utils/sse.js";
 
 const baseUrl = import.meta.env.VITE_BASE_URL
 const user = JSON.parse(localStorage.getItem('sys-user') || '{}')
@@ -102,6 +107,9 @@ const data = reactive({
   chatVisible: false,
   question: '',
   loading: false,
+  status: '',
+  handoff: null,
+  conversationId: null,
   messages: [
     {
       role: 'assistant',
@@ -137,7 +145,15 @@ const ask = () => {
   data.messages.push({ role: 'assistant', content: '' })
   const answer = data.messages[data.messages.length - 1]
 
-  streamAsk('/knowledgeChat/frontAskStream', { question }, answer).finally(() => {
+  data.status = '正在编排智能体'
+  data.handoff = null
+  streamAsk('/knowledgeChat/frontAskStream', {
+    question,
+    requestId: crypto.randomUUID(),
+    conversationId: data.conversationId || (data.conversationId = crypto.randomUUID()),
+    chatModelProfile: 'default-chat',
+    embeddingModelProfile: 'default-embedding'
+  }, answer).finally(() => {
     data.loading = false
   })
 }
@@ -157,47 +173,36 @@ const streamAsk = async (url, payload, answer) => {
       ElMessage.error('AI 流式生成失败')
       return
     }
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder('utf-8')
-    let buffer = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) {
-        break
-      }
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop() || ''
-      parts.forEach(part => handleSsePart(part, answer))
-    }
-    if (buffer) {
-      handleSsePart(buffer, answer)
-    }
+    await consumeSseResponse(response, event => handleSseEvent(event, answer))
   } catch (e) {
     console.error(e)
     ElMessage.error('AI 流式生成失败')
   }
 }
 
-const handleSsePart = (part, answer) => {
-  const lines = part.split('\n')
-  let eventName = 'message'
-  const dataLines = []
-  lines.forEach(line => {
-    if (line.startsWith('event:')) {
-      eventName = line.substring(6).trim()
-    } else if (line.startsWith('data:')) {
-      dataLines.push(line.substring(5))
-    }
-  })
-  const eventData = dataLines.join('\n')
-  if (eventName === 'message') {
+const handleSseEvent = ({ name, data: eventData }, answer) => {
+  if (name === 'status') {
+    const value = parseSseData(eventData)
+    data.status = value.phase || eventData
+    return
+  }
+  if (name === 'review') {
+    const value = parseSseData(eventData)
+    data.status = `审查 ${value.decision || ''}`
+    return
+  }
+  if (name === 'handoff') {
+    data.handoff = parseSseData(eventData)
+    return
+  }
+  if (name === 'message') {
     answer.content += eventData
     scrollMessage()
     return
   }
-  if (eventName === 'error') {
-    ElMessage.error(eventData || 'AI 流式生成失败')
+  if (name === 'error') {
+    const value = parseSseData(eventData)
+    ElMessage.error(value.publicMessage || eventData || 'AI 流式生成失败')
   }
 }
 

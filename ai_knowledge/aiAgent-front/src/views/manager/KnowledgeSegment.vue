@@ -67,7 +67,7 @@ const data = reactive({
   tableData: [],
   knowledgeBaseList: [],
   documentList: [],
-  vectorModelList: [{ name: 'default-embedding', label: '默认向量模型' }],
+  vectorModelList: [],
   pageNum: 1,
   pageSize: 10,
   total: 0,
@@ -85,6 +85,17 @@ const loadKnowledgeBase = () => {
   request.get('/knowledgeBase/selectAll').then(res => {
     if (res.code === '200') {
       data.knowledgeBaseList = res.data || []
+    }
+  })
+}
+
+const loadVectorProfiles = () => {
+  request.get('/knowledgeChat/capabilities').then(res => {
+    if (res.code === '200') {
+      data.vectorModelList = (res.data || [])
+          .filter(item => item.kind === 'embedding' && item.enabled)
+          .map(item => ({ name: item.name, label: `${item.name}（${item.model}）` }))
+      if (data.vectorModelList.length) data.embeddingProfile = data.vectorModelList[0].name
     }
   })
 }
@@ -227,6 +238,7 @@ const reset = () => {
 
 loadKnowledgeBase()
 loadDocument()
+loadVectorProfiles()
 load()
 </script>
 <style>

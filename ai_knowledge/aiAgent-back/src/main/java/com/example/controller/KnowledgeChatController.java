@@ -1,5 +1,6 @@
 package com.example.controller;
 
+import com.example.common.Result;
 import com.example.entity.KnowledgeChatRequest;
 import com.example.service.MultiAgentChatService;
 import org.springframework.web.bind.annotation.*;
@@ -29,5 +30,10 @@ public class KnowledgeChatController {
     @PostMapping(value = "/frontAskStream", produces = "text/event-stream;charset=UTF-8")
     public SseEmitter frontAskStream(@RequestBody KnowledgeChatRequest request) {
         return multiAgentChatService.chatStream(request, true);
+    }
+
+    @GetMapping("/capabilities")
+    public Result capabilities() {
+        return Result.success(multiAgentChatService.modelCapabilities());
     }
 }

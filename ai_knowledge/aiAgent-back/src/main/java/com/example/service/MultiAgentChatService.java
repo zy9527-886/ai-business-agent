@@ -16,6 +16,7 @@ import reactor.core.Disposable;
 import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
@@ -86,6 +87,16 @@ public class MultiAgentChatService {
         emitter.onTimeout(cancel);
         emitter.onError(error -> cancel.run());
         return emitter;
+    }
+
+    public List<Map<String, Object>> modelCapabilities() {
+        if (properties.isEnabled() && pythonClient.isAvailable()) {
+            return pythonClient.modelCapabilities();
+        }
+        return List.of(
+                Map.of("name", "default-chat", "kind", "chat", "model", "legacy-java", "enabled", false),
+                Map.of("name", "default-embedding", "kind", "embedding", "model", "legacy-java", "enabled", false)
+        );
     }
 
     private void send(SseEmitter emitter, PythonAgentClient.StreamEvent event) {

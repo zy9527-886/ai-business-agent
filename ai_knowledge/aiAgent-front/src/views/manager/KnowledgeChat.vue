@@ -1,16 +1,21 @@
 <template>
   <div class="chat-page">
     <div class="chat-toolbar card">
-      <el-select v-model="data.chatModelConfigId" clearable style="width: 260px" placeholder="请选择聊天模型">
-        <el-option v-for="item in data.chatModelList" :key="item.id" :label="item.name + '（' + item.modelName + '）'" :value="item.id"></el-option>
+      <el-select v-model="data.chatModelProfile" clearable style="width: 220px" placeholder="请选择聊天 Profile">
+        <el-option v-for="item in data.chatModelList" :key="item.name" :label="item.name + '（' + item.model + '）'" :value="item.name"></el-option>
       </el-select>
-      <el-select v-model="data.embeddingModelConfigId" clearable style="width: 260px" placeholder="请选择向量模型">
-        <el-option v-for="item in data.embeddingModelList" :key="item.id" :label="item.name + '（' + item.modelName + '）'" :value="item.id"></el-option>
+      <el-select v-model="data.embeddingModelProfile" clearable style="width: 220px" placeholder="请选择向量 Profile">
+        <el-option v-for="item in data.embeddingModelList" :key="item.name" :label="item.name + '（' + item.model + '）'" :value="item.name"></el-option>
       </el-select>
       <div class="toolbar-field">
         <span>TopK</span>
         <el-input-number v-model="data.topK" :min="1" :max="10" controls-position="right" style="width: 110px" />
       </div>
+      <el-checkbox-group v-model="data.enabledAgents">
+        <el-checkbox-button label="knowledge">知识</el-checkbox-button>
+        <el-checkbox-button label="business">演示业务</el-checkbox-button>
+        <el-checkbox-button label="web">网页</el-checkbox-button>
+      </el-checkbox-group>
       <div class="toolbar-field threshold-field">
         <span>相似度</span>
         <el-slider v-model="data.similarityThreshold" :min="0" :max="1" :step="0.05" style="width: 160px" />
@@ -51,13 +56,20 @@
           <el-tag type="success" v-if="data.sources.length">{{ data.sources.length }} 条</el-tag>
           <el-tag type="info" v-else>暂无</el-tag>
         </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px">
+          <el-tag>{{ data.status || '等待提问' }}</el-tag>
+          <el-tag v-if="data.review" :type="data.review.decision === 'PASS' ? 'success' : 'warning'">审查 {{ data.review.decision }}</el-tag>
+          <el-tag v-if="data.handoff" type="danger">已转人工</el-tag>
+        </div>
         <div class="source-list" v-if="data.sources.length">
-          <div class="source-card" v-for="item in data.sources" :key="item.segmentId">
+          <div class="source-card" v-for="item in data.sources" :key="item.sourceId">
             <div class="source-meta">
-              <span>片段 #{{ item.segmentId }}</span>
-              <el-tag size="small" type="warning">相似度 {{ formatSimilarity(item.similarity) }}</el-tag>
+              <span>{{ item.title || item.sourceId }}</span>
+              <el-tag v-if="item.score != null" size="small" type="warning">相关度 {{ formatSimilarity(item.score) }}</el-tag>
+              <el-tag v-if="item.demo" size="small" type="danger">演示数据</el-tag>
             </div>
             <p>{{ item.content }}</p>
+            <a v-if="item.url" :href="item.url" target="_blank" rel="noopener noreferrer">查看网页来源</a>
           </div>
         </div>
         <el-empty v-else description="发送问题后显示资料来源" />
@@ -70,6 +82,7 @@
 import { nextTick, reactive, ref } from "vue";
 import request from "@/utils/request.js";
 import { ElMessage } from "element-plus";
+import { consumeSseResponse, parseSseData } from "@/utils/sse.js";
 
 const baseUrl = import.meta.env.VITE_BASE_URL
 const user = JSON.parse(localStorage.getItem('sys-user') || '{}')
@@ -79,12 +92,17 @@ const messageListRef = ref()
 const data = reactive({
   chatModelList: [],
   embeddingModelList: [],
-  chatModelConfigId: null,
-  embeddingModelConfigId: null,
+  chatModelProfile: 'default-chat',
+  embeddingModelProfile: 'default-embedding',
+  enabledAgents: ['knowledge', 'business', 'web'],
   topK: 5,
   similarityThreshold: 0.2,
   question: '',
   loading: false,
+  status: '',
+  review: null,
+  handoff: null,
+  conversationId: null,
   messages: [
     {
       role: 'assistant',
@@ -95,31 +113,27 @@ const data = reactive({
 })
 
 const loadModelList = () => {
-  request.get('/aiModelConfig/selectAll', {
-    params: {
-      enabled: '是'
-    }
-  }).then(res => {
+  request.get('/knowledgeChat/capabilities').then(res => {
     if (res.code === '200') {
       const list = res.data || []
-      data.chatModelList = list.filter(item => item.modelType === '聊天模型')
-      data.embeddingModelList = list.filter(item => item.modelType === '向量模型')
-      if (!data.chatModelConfigId && data.chatModelList.length) {
-        data.chatModelConfigId = data.chatModelList[0].id
+      data.chatModelList = list.filter(item => item.kind === 'chat' && item.enabled)
+      data.embeddingModelList = list.filter(item => item.kind === 'embedding' && item.enabled)
+      if (data.chatModelList.length) {
+        data.chatModelProfile = data.chatModelList[0].name
       }
-      if (!data.embeddingModelConfigId && data.embeddingModelList.length) {
-        data.embeddingModelConfigId = data.embeddingModelList[0].id
+      if (data.embeddingModelList.length) {
+        data.embeddingModelProfile = data.embeddingModelList[0].name
       }
     }
   })
 }
 
 const ask = () => {
-  if (!data.chatModelConfigId) {
+  if (!data.chatModelProfile) {
     ElMessage.warning('请选择聊天模型')
     return
   }
-  if (!data.embeddingModelConfigId) {
+  if (!data.embeddingModelProfile) {
     ElMessage.warning('请选择向量模型')
     return
   }
@@ -139,13 +153,19 @@ const ask = () => {
 
   // 清空上一次来源，并先放一条空的客服消息，流式内容会不断追加到它上面
   data.sources = []
+  data.review = null
+  data.handoff = null
+  data.status = '正在编排智能体'
   data.messages.push({ role: 'assistant', content: '' })
   const answer = data.messages[data.messages.length - 1]
 
   streamAsk('/knowledgeChat/askStream', {
     question,
-    chatModelConfigId: data.chatModelConfigId,
-    embeddingModelConfigId: data.embeddingModelConfigId,
+    requestId: crypto.randomUUID(),
+    conversationId: data.conversationId || (data.conversationId = crypto.randomUUID()),
+    chatModelProfile: data.chatModelProfile,
+    embeddingModelProfile: data.embeddingModelProfile,
+    enabledAgents: data.enabledAgents,
     topK: data.topK,
     similarityThreshold: data.similarityThreshold
   }, answer).finally(() => {
@@ -168,57 +188,45 @@ const streamAsk = async (url, payload, answer) => {
       ElMessage.error('AI 流式生成失败')
       return
     }
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder('utf-8')
-    let buffer = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) {
-        break
-      }
-      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
-      const parts = buffer.split('\n\n')
-      buffer = parts.pop() || ''
-      parts.forEach(part => handleSsePart(part, answer))
-    }
-    if (buffer) {
-      handleSsePart(buffer, answer)
-    }
+    await consumeSseResponse(response, event => handleSseEvent(event, answer))
   } catch (e) {
     console.error(e)
     ElMessage.error('AI 流式生成失败')
   }
 }
 
-const handleSsePart = (part, answer) => {
-  const lines = part.split('\n')
-  let eventName = 'message'
-  const dataLines = []
-  lines.forEach(line => {
-    if (line.startsWith('event:')) {
-      eventName = line.substring(6).trim()
-    } else if (line.startsWith('data:')) {
-      dataLines.push(line.substring(5))
-    }
-  })
-  const eventData = dataLines.join('\n')
-  if (eventName === 'sources') {
+const handleSseEvent = ({ name, data: eventData }, answer) => {
+  if (name === 'sources') {
     // sources 事件携带命中的知识片段 JSON，渲染到右侧来源区
     try {
-      data.sources = JSON.parse(eventData) || []
+      data.sources = parseSseData(eventData) || []
     } catch (e) {
       data.sources = []
     }
     return
   }
-  if (eventName === 'message') {
+  if (name === 'status') {
+    const value = parseSseData(eventData)
+    data.status = value.phase || eventData
+    return
+  }
+  if (name === 'review') {
+    data.review = parseSseData(eventData)
+    return
+  }
+  if (name === 'handoff') {
+    data.handoff = parseSseData(eventData)
+    return
+  }
+  if (name === 'message') {
     // message 是模型增量文本，直接追加
     answer.content += eventData
     scrollToBottom()
     return
   }
-  if (eventName === 'error') {
-    ElMessage.error(eventData || 'AI 流式生成失败')
+  if (name === 'error') {
+    const value = parseSseData(eventData)
+    ElMessage.error(value.publicMessage || eventData || 'AI 流式生成失败')
   }
 }
 

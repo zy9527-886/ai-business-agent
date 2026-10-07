@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Protocol
 
 from fastapi import APIRouter, Depends
@@ -19,7 +20,9 @@ class EmbeddingResponse(BaseModel):
 
 
 def build_embeddings_router(
-    provider: EmbeddingService, auth_dependency: object
+    provider: EmbeddingService,
+    auth_dependency: object,
+    model_capabilities: Callable[[], list[dict[str, object]]] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/v1", tags=["models"], dependencies=[Depends(auth_dependency)])
 
@@ -34,7 +37,8 @@ def build_embeddings_router(
 
     @router.get("/capabilities/models")
     async def model_capabilities() -> dict[str, object]:
-        return {"profiles": provider.capabilities()}
+        capabilities = model_capabilities() if model_capabilities else provider.capabilities()
+        return {"profiles": capabilities}
 
     return router
 
