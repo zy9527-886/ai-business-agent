@@ -11,6 +11,7 @@ from app.graph.routing import merge_specialist_results
 from app.graph.state import GraphOutcome, GraphState
 from app.models.api import ChatStreamRequest
 from app.models.domain import AgentError, ReviewResult, SpecialistResult
+from app.persistence.checkpoints import checkpoint_config
 
 
 class MultiAgentRuntime:
@@ -22,12 +23,20 @@ class MultiAgentRuntime:
         answer: object,
         reviewer: object,
         guard: GuardAgent | None = None,
+        conversation_repository: object | None = None,
+        run_repository: object | None = None,
+        handoff_repository: object | None = None,
+        checkpointer: object | None = None,
     ) -> None:
         self._router = router
         self._specialists = specialists
         self._answer = answer
         self._reviewer = reviewer
         self._guard = guard or GuardAgent()
+        self._conversations = conversation_repository
+        self._runs = run_repository
+        self._handoffs = handoff_repository
+        self._checkpointer = checkpointer
         self._graph = self._build_graph()
 
     def _build_graph(self):
@@ -47,23 +56,50 @@ class MultiAgentRuntime:
             "review", self._after_review, {"rewrite": "rewrite", "done": END}
         )
         graph.add_edge("rewrite", "review")
-        return graph.compile()
+        return graph.compile(checkpointer=self._checkpointer)
 
     async def run(self, request: ChatStreamRequest, *, allowed: list[str]) -> GraphOutcome:
         enabled = set(request.options.enabled_agents)
         effective_allowed = [name for name in allowed if name in enabled]
-        state = await self._graph.ainvoke({
-            "request": request,
-            "allowed": effective_allowed,
-            "evidence": [],
-            "errors": [],
-            "rewrite_count": 0,
-        })
+        if self._conversations is not None:
+            await self._conversations.ensure(
+                request.conversation_id, request.user.user_id, request.question[:100]
+            )
+        if self._runs is not None:
+            await self._runs.start(
+                request.request_id,
+                request.conversation_id,
+                request.user.user_id,
+                request.model_dump(mode="json", by_alias=True),
+            )
+        try:
+            state = await self._graph.ainvoke(
+                {
+                    "request": request,
+                    "allowed": effective_allowed,
+                    "evidence": [],
+                    "errors": [],
+                    "rewrite_count": 0,
+                },
+                config=(
+                    checkpoint_config(request.conversation_id, request.user.user_id)
+                    if self._checkpointer is not None
+                    else None
+                ),
+            )
+        except asyncio.CancelledError:
+            if self._runs is not None:
+                await self._runs.finish(request.request_id, "cancelled", None, [], [])
+            raise
+        except BaseException:
+            if self._runs is not None:
+                await self._runs.finish(request.request_id, "failed", None, [], [])
+            raise
         review = state.get("review") or ReviewResult(
             decision="HANDOFF", confidence=0.0, grounded=False,
             risk_level="medium", issues=["incomplete graph"],
         )
-        return GraphOutcome(
+        outcome = GraphOutcome(
             request_id=request.request_id,
             conversation_id=request.conversation_id,
             route=state.get("route"),
@@ -74,6 +110,23 @@ class MultiAgentRuntime:
             blocked=state.get("blocked", False),
             block_reason=state.get("block_reason"),
         )
+        if self._runs is not None:
+            terminal_status = "handoff" if review.decision == "HANDOFF" else "completed"
+            await self._runs.finish(
+                request.request_id,
+                terminal_status,
+                outcome.route.model_dump(mode="json", by_alias=True) if outcome.route else None,
+                [item.model_dump(mode="json", by_alias=True) for item in outcome.evidence],
+                [item.model_dump(mode="json", by_alias=True) for item in outcome.errors],
+            )
+        if review.decision == "HANDOFF" and self._handoffs is not None:
+            await self._handoffs.create(
+                request.request_id,
+                request.conversation_id,
+                request.user.user_id,
+                outcome.block_reason or "; ".join(review.issues) or "review handoff",
+            )
+        return outcome
 
     async def _guard_node(self, state: GraphState) -> dict[str, Any]:
         allowed, reason = self._guard.check(state["request"].question)

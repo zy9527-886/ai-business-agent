@@ -32,12 +32,13 @@ def create_app(
     embedding_provider: Any | None = None,
     chat_runtime: Any | None = None,
     capability_registry: Any | None = None,
+    handoff_repository: Any | None = None,
     shared_secret: str | None = None,
 ) -> FastAPI:
     settings = get_settings()
     app = FastAPI(title=settings.app_name, version="0.1.0")
     app.include_router(build_health_router(readiness_check or (lambda: True)))
-    if embedding_provider is not None or chat_runtime is not None:
+    if embedding_provider is not None or chat_runtime is not None or handoff_repository is not None:
         verifier = SignatureVerifier(
             shared_secret or settings.shared_secret,
             InMemoryNonceStore(),
@@ -56,6 +57,10 @@ def create_app(
             app.include_router(
                 build_chat_router(chat_runtime, capability_registry, auth_dependency)
             )
+        if handoff_repository is not None:
+            from app.api.handoffs import build_handoff_router
+
+            app.include_router(build_handoff_router(handoff_repository, auth_dependency))
     return app
 
 
@@ -78,6 +83,26 @@ def create_default_app() -> FastAPI:
         else None
     )
     capabilities = CapabilityRegistry(web_enabled=web_provider is not None)
+    database = None
+    checkpointer = None
+    conversations = None
+    runs = None
+    handoffs = None
+    if settings.database_url:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+        from app.persistence.database import Database
+        from app.persistence.repositories import (
+            ConversationRepository,
+            HandoffRepository,
+            RunRepository,
+        )
+
+        database = Database(settings.database_url)
+        conversations = ConversationRepository(database.pool)
+        runs = RunRepository(database.pool)
+        handoffs = HandoffRepository(database.pool)
+        checkpointer = AsyncPostgresSaver(database.pool)
     runtime = MultiAgentRuntime(
         router=RouterAgent(chat),
         specialists={
@@ -87,6 +112,10 @@ def create_default_app() -> FastAPI:
         },
         answer=AnswerAgent(chat),
         reviewer=ReviewerAgent(chat),
+        conversation_repository=conversations,
+        run_repository=runs,
+        handoff_repository=handoffs,
+        checkpointer=checkpointer,
     )
     default_app = create_app(
         readiness_check=lambda: any(
@@ -99,14 +128,24 @@ def create_default_app() -> FastAPI:
         embedding_provider=embeddings,
         chat_runtime=runtime,
         capability_registry=capabilities,
+        handoff_repository=handoffs,
         shared_secret=settings.shared_secret,
     )
+
+    async def start_persistence() -> None:
+        if database is not None:
+            await database.open()
+            await database.bootstrap()
+            await checkpointer.setup()
 
     async def close_clients() -> None:
         await java.aclose()
         if web_provider is not None:
             await web_provider.aclose()
+        if database is not None:
+            await database.close()
 
+    default_app.router.add_event_handler("startup", start_persistence)
     default_app.router.add_event_handler("shutdown", close_clients)
     return default_app
 
