@@ -1,5 +1,7 @@
 package com.example.entity;
 
+import java.util.List;
+
 public class KnowledgeChatRequest {
 
     /** 用户问题 */
@@ -12,6 +14,11 @@ public class KnowledgeChatRequest {
     private Integer topK;
     /** 相似度阈值 */
     private Double similarityThreshold;
+    private String requestId;
+    private String conversationId;
+    private String chatModelProfile;
+    private String embeddingModelProfile;
+    private List<String> enabledAgents;
 
     public String getQuestion() {
         return question;
@@ -52,4 +59,15 @@ public class KnowledgeChatRequest {
     public void setSimilarityThreshold(Double similarityThreshold) {
         this.similarityThreshold = similarityThreshold;
     }
+
+    public String getRequestId() { return requestId; }
+    public void setRequestId(String requestId) { this.requestId = requestId; }
+    public String getConversationId() { return conversationId; }
+    public void setConversationId(String conversationId) { this.conversationId = conversationId; }
+    public String getChatModelProfile() { return chatModelProfile; }
+    public void setChatModelProfile(String chatModelProfile) { this.chatModelProfile = chatModelProfile; }
+    public String getEmbeddingModelProfile() { return embeddingModelProfile; }
+    public void setEmbeddingModelProfile(String embeddingModelProfile) { this.embeddingModelProfile = embeddingModelProfile; }
+    public List<String> getEnabledAgents() { return enabledAgents; }
+    public void setEnabledAgents(List<String> enabledAgents) { this.enabledAgents = enabledAgents; }
 }
