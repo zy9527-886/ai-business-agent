@@ -30,6 +30,11 @@ class AgentError(ApiModel):
     public_message: str
 
 
+class SpecialistResult(ApiModel):
+    evidence: list[Evidence] = Field(default_factory=list)
+    errors: list[AgentError] = Field(default_factory=list)
+
+
 class ReviewResult(ApiModel):
     decision: Literal["PASS", "RETRY", "HANDOFF"]
     confidence: float = Field(ge=0, le=1)
