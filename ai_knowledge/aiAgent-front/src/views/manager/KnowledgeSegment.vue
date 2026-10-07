@@ -13,8 +13,8 @@
         <el-option label="已向量化" value="已向量化"></el-option>
         <el-option label="向量化失败" value="向量化失败"></el-option>
       </el-select>
-      <el-select v-model="data.modelConfigId" clearable style="width: 200px; margin-right: 10px" placeholder="请选择向量模型">
-        <el-option v-for="item in data.vectorModelList" :key="item.id" :label="item.name + '（' + item.modelName + '）'" :value="item.id"></el-option>
+      <el-select v-model="data.embeddingProfile" clearable style="width: 200px; margin-right: 10px" placeholder="请选择向量模型">
+        <el-option v-for="item in data.vectorModelList" :key="item.name" :label="item.label" :value="item.name"></el-option>
       </el-select>
       <el-button type="warning" plain :loading="data.vectorLoading" @click="vectorizeBatch">批量向量化</el-button>
       <el-button type="danger" plain @click="delBatch">批量删除</el-button>
@@ -67,7 +67,7 @@ const data = reactive({
   tableData: [],
   knowledgeBaseList: [],
   documentList: [],
-  vectorModelList: [],
+  vectorModelList: [{ name: 'default-embedding', label: '默认向量模型' }],
   pageNum: 1,
   pageSize: 10,
   total: 0,
@@ -75,7 +75,7 @@ const data = reactive({
   knowledgeBaseId: null,
   documentId: null,
   vectorStatus: null,
-  modelConfigId: null,
+  embeddingProfile: 'default-embedding',
   vectorLoading: false,
   currentVectorId: null,
   ids: []
@@ -102,22 +102,6 @@ const loadDocument = () => {
   })
 }
 
-const loadVectorModel = () => {
-  request.get('/aiModelConfig/selectAll', {
-    params: {
-      modelType: '向量模型',
-      enabled: '是'
-    }
-  }).then(res => {
-    if (res.code === '200') {
-      data.vectorModelList = res.data || []
-      if (!data.modelConfigId && data.vectorModelList.length) {
-        data.modelConfigId = data.vectorModelList[0].id
-      }
-    }
-  })
-}
-
 const load = () => {
   request.get('/knowledgeSegment/selectPage', {
     params: {
@@ -137,8 +121,8 @@ const load = () => {
 }
 
 const checkModel = () => {
-  if (!data.modelConfigId) {
-    ElMessage.warning('请选择向量模型配置')
+  if (!data.embeddingProfile) {
+    ElMessage.warning('请选择 Python 向量模型配置')
     return false
   }
   return true
@@ -151,7 +135,7 @@ const vectorizeOne = (row) => {
   data.currentVectorId = row.id
   request.post('/knowledgeSegment/vectorize/' + row.id, null, {
     params: {
-      modelConfigId: data.modelConfigId
+      profile: data.embeddingProfile
     }
   }).then(res => {
     if (res.code === '200') {
@@ -176,7 +160,7 @@ const vectorizeBatch = () => {
   data.vectorLoading = true
   request.post('/knowledgeSegment/vectorize/batch', {
     ids: data.ids,
-    modelConfigId: data.modelConfigId
+    profile: data.embeddingProfile
   }).then(res => {
     if (res.code === '200') {
       ElMessage.success('向量化成功')
@@ -243,7 +227,6 @@ const reset = () => {
 
 loadKnowledgeBase()
 loadDocument()
-loadVectorModel()
 load()
 </script>
 <style>

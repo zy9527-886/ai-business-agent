@@ -30,8 +30,9 @@ public class KnowledgeSegmentController {
      * 单个知识片段向量化
      */
     @PostMapping("/vectorize/{id}")
-    public Result vectorize(@PathVariable Integer id, @RequestParam Integer modelConfigId) {
-        knowledgeSegmentService.vectorizeById(id, modelConfigId);
+    public Result vectorize(@PathVariable Integer id,
+                            @RequestParam(defaultValue = "default-embedding") String profile) {
+        knowledgeSegmentService.vectorizeById(id, profile);
         return Result.success();
     }
 
@@ -40,7 +41,7 @@ public class KnowledgeSegmentController {
      */
     @PostMapping("/vectorize/batch")
     public Result vectorizeBatch(@RequestBody VectorizeRequest request) {
-        knowledgeSegmentService.vectorizeBatch(request.getIds(), request.getModelConfigId());
+        knowledgeSegmentService.vectorizeBatch(request.getIds(), request.getProfile());
         return Result.success();
     }
 

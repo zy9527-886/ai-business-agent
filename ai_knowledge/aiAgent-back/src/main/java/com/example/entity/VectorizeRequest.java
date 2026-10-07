@@ -4,17 +4,17 @@ import java.util.List;
 
 public class VectorizeRequest {
 
-    /** 向量模型配置ID */
-    private Integer modelConfigId;
+    /** Python 模型配置名 */
+    private String profile = "default-embedding";
     /** 知识片段ID集合 */
     private List<Integer> ids;
 
-    public Integer getModelConfigId() {
-        return modelConfigId;
+    public String getProfile() {
+        return profile;
     }
 
-    public void setModelConfigId(Integer modelConfigId) {
-        this.modelConfigId = modelConfigId;
+    public void setProfile(String profile) {
+        this.profile = profile;
     }
 
     public List<Integer> getIds() {

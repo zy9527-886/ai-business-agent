@@ -3,19 +3,19 @@ package com.example.service;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
+import com.example.client.PythonEmbeddingClient;
 import com.example.common.enums.ResultCodeEnum;
+import com.example.config.PgVectorConfig;
 import com.example.entity.KnowledgeDocument;
 import com.example.entity.KnowledgeSegment;
-import com.example.entity.AiModelConfig;
 import com.example.entity.KnowledgeBase;
+import com.example.entity.agent.EmbeddingResponse;
 import com.example.exception.CustomException;
-import com.example.mapper.AiModelConfigMapper;
 import com.example.mapper.KnowledgeBaseMapper;
 import com.example.mapper.KnowledgeDocumentMapper;
 import com.example.mapper.KnowledgeSegmentMapper;
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
-import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,18 +28,26 @@ public class KnowledgeSegmentService {
     private static final int MAX_CHUNK_LENGTH = 500;
     private static final int OVERLAP_LENGTH = 80;
 
-    @Resource
-    private KnowledgeSegmentMapper knowledgeSegmentMapper;
-    @Resource
-    private KnowledgeDocumentMapper knowledgeDocumentMapper;
-    @Resource
-    private AiModelConfigMapper aiModelConfigMapper;
-    @Resource
-    private KnowledgeBaseMapper knowledgeBaseMapper;
-    @Resource
-    private EmbeddingService embeddingService;
-    @Resource
-    private PgVectorService pgVectorService;
+    private final KnowledgeSegmentMapper knowledgeSegmentMapper;
+    private final KnowledgeDocumentMapper knowledgeDocumentMapper;
+    private final KnowledgeBaseMapper knowledgeBaseMapper;
+    private final PythonEmbeddingClient embeddingClient;
+    private final PgVectorService pgVectorService;
+    private final PgVectorConfig pgVectorConfig;
+
+    public KnowledgeSegmentService(KnowledgeSegmentMapper knowledgeSegmentMapper,
+                                   KnowledgeDocumentMapper knowledgeDocumentMapper,
+                                   KnowledgeBaseMapper knowledgeBaseMapper,
+                                   PythonEmbeddingClient embeddingClient,
+                                   PgVectorService pgVectorService,
+                                   PgVectorConfig pgVectorConfig) {
+        this.knowledgeSegmentMapper = knowledgeSegmentMapper;
+        this.knowledgeDocumentMapper = knowledgeDocumentMapper;
+        this.knowledgeBaseMapper = knowledgeBaseMapper;
+        this.embeddingClient = embeddingClient;
+        this.pgVectorService = pgVectorService;
+        this.pgVectorConfig = pgVectorConfig;
+    }
 
     @Transactional
     public void deleteById(Integer id) {
@@ -64,7 +72,7 @@ public class KnowledgeSegmentService {
         return PageInfo.of(list);
     }
 
-    public void vectorizeById(Integer id, Integer modelConfigId) {
+    public void vectorizeById(Integer id, String profile) {
         KnowledgeSegment segment = knowledgeSegmentMapper.selectById(id);
         if (ObjectUtil.isNull(segment)) {
             throw new CustomException(ResultCodeEnum.PARAM_ERROR.code, "知识片段不存在");
@@ -74,8 +82,12 @@ public class KnowledgeSegmentService {
         }
 
         try {
-            AiModelConfig modelConfig = getVectorModelConfig(modelConfigId);
-            pgVectorService.saveSegmentVector(segment, embeddingService.embed(modelConfig, segment.getContent()));
+            if (StrUtil.isBlank(profile)) {
+                throw new CustomException(ResultCodeEnum.PARAM_ERROR.code, "请选择向量模型配置");
+            }
+            EmbeddingResponse response = embeddingClient.embed(profile, List.of(segment.getContent()));
+            List<Double> vector = extractSingleVector(response);
+            pgVectorService.saveSegmentVector(segment, vector);
             knowledgeSegmentMapper.updateVectorStatus(id, "已向量化", DateUtil.now());
             // 片段状态变了，同步刷新所属文档的整体向量化状态
             refreshDocumentVectorStatus(segment.getDocumentId());
@@ -90,12 +102,12 @@ public class KnowledgeSegmentService {
         }
     }
 
-    public void vectorizeBatch(List<Integer> ids, Integer modelConfigId) {
+    public void vectorizeBatch(List<Integer> ids, String profile) {
         if (ids == null || ids.isEmpty()) {
             throw new CustomException(ResultCodeEnum.PARAM_ERROR.code, "请选择知识片段");
         }
         for (Integer id : ids) {
-            vectorizeById(id, modelConfigId);
+            vectorizeById(id, profile);
         }
     }
 
@@ -166,15 +178,18 @@ public class KnowledgeSegmentService {
         knowledgeDocumentMapper.updateVectorStatus(documentId, status, DateUtil.now());
     }
 
-    private AiModelConfig getVectorModelConfig(Integer modelConfigId) {
-        if (ObjectUtil.isNull(modelConfigId)) {
-            throw new CustomException(ResultCodeEnum.PARAM_ERROR.code, "请选择向量模型配置");
+    private List<Double> extractSingleVector(EmbeddingResponse response) {
+        if (response.getDimension() == null || response.getVectors() == null
+                || response.getVectors().size() != 1 || response.getVectors().getFirst() == null) {
+            throw new CustomException(ResultCodeEnum.SYSTEM_ERROR.code, "Python 向量服务返回格式错误");
         }
-        AiModelConfig modelConfig = aiModelConfigMapper.selectById(modelConfigId);
-        if (ObjectUtil.isNull(modelConfig)) {
-            throw new CustomException(ResultCodeEnum.PARAM_ERROR.code, "向量模型配置不存在");
+        List<Double> vector = response.getVectors().getFirst();
+        int expected = pgVectorConfig.getDimension();
+        if (response.getDimension() != expected || vector.size() != expected) {
+            throw new CustomException(ResultCodeEnum.PARAM_ERROR.code,
+                    "向量维度不匹配：期望 " + expected + "，实际 " + response.getDimension());
         }
-        return modelConfig;
+        return vector;
     }
 
     private List<String> splitText(String text, int chunkSize, int overlapSize) {
