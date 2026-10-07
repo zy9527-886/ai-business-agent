@@ -1,0 +1,13 @@
+profiles:
+  default-chat:
+    kind: chat
+    model: deepseek-chat
+    base_url: https://api.deepseek.com/v1
+    api_key_env: CHAT_MODEL_API_KEY
+    temperature: 0.1
+  default-embedding:
+    kind: embedding
+    model: text-embedding-v3
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key_env: EMBEDDING_MODEL_API_KEY
+    dimension: 1024

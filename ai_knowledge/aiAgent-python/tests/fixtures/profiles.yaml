@@ -1,0 +1,17 @@
+profiles:
+  chat-main:
+    kind: chat
+    model: demo-chat
+    base_url: https://models.example/v1
+    api_key_env: CHAT_SECRET
+  embed-main:
+    kind: embedding
+    model: demo-embedding
+    base_url: https://models.example/v1
+    api_key_env: EMBED_SECRET
+    dimension: 3
+  disabled:
+    kind: chat
+    model: disabled
+    api_key_env: CHAT_SECRET
+    enabled: false
